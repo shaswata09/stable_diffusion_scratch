@@ -1,10 +1,19 @@
 import torch
-import torch.nn as nn
 from decoder import VAE_AttentionBlock, VAE_ResidualBlock
+from torch import nn
 from torch.nn import functional as F
 
 
 class VAE_Encoder(nn.Sequential):
+    """_summary_
+    Args:
+        nn (nn.Sequential): The encoder is implemented as a sequential model consisting of multiple layers.
+        The encoder takes an input image tensor of shape (Batch_Size, 3, Height, Width) and processes it through a series of
+        convolutional, residual, and attention layers to produce an output tensor of shape (Batch_Size, 8, Height/8, Width/8).
+    Returns:
+        torch.Tensor: The output tensor from the encoder, which contains the parameters for the latent space distribution in a VAE.
+
+    """
 
     def __init__(self):
         super().__init__(
@@ -45,7 +54,7 @@ class VAE_Encoder(nn.Sequential):
             # (Batch_Size, 512, Height/8, Width/8) --> (Batch_Size, 512, Height/8, Width/8)
             VAE_ResidualBlock(in_channels=512, out_channels=512),
             # (Batch_Size, 512, Height/8, Width/8) --> (Batch_Size, 512, Height/8, Width/8)
-            nn.GroupNorm(num_groups=32, num_channels=512, eps=1e-6),
+            nn.GroupNorm(num_groups=32, num_channels=512),
             # SiLU Activation (It's also known as Swish Activation and is similar to ReLU but smoother.)
             # It helps in better gradient flow and improved performance in deep networks.
             nn.SiLU(),
