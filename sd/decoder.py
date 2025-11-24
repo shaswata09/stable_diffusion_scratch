@@ -132,3 +132,68 @@ class VAE_ResidualBlock(nn.Module):
         # This is the core idea of a residual block, helping to mitigate the vanishing gradient problem and allowing for deeper networks.
         # (Batch_Size, Out_Channels, Height, Width)
         return x + residue  # Residual connection
+
+
+class VAE_Decoder(nn.Sequential):
+
+    def __init__(self):
+        super().__init__(
+            # (Batch_Size, 4, Height / 8, Width / 8) -> (Batch_Size, 4, Height / 8, Width / 8)
+            nn.Conv2d(in_channels=4, out_channels=4, kernel_size=1, padding=0),
+            # (Batch_Size, 4, Height / 8, Width / 8) -> (Batch_Size, 512, Height / 8, Width / 8)
+            nn.Conv2d(in_channels=4, out_channels=512, kernel_size=3, padding=1),
+            # (Batch_Size, 512, Height / 8, Width / 8) -> (Batch_Size, 512, Height / 8, Width / 8)
+            VAE_ResidualBlock(in_channels=512, out_channels=512),
+            # (Batch_Size, 512, Height / 8, Width / 8) -> (Batch_Size, 512, Height / 8, Width / 8)
+            VAE_AttentionBlock(channels=512),
+            # (Batch_Size, 512, Height / 8, Width / 8) -> (Batch_Size, 512, Height / 8, Width / 8)
+            VAE_ResidualBlock(in_channels=512, out_channels=512),
+            VAE_ResidualBlock(in_channels=512, out_channels=512),
+            VAE_ResidualBlock(in_channels=512, out_channels=512),
+            VAE_ResidualBlock(in_channels=512, out_channels=512),
+            # (Batch_Size, 512, Height / 8, Width / 8) -> (Batch_Size, 512, Height / 4, Width / 4)
+            nn.Upsample(scale_factor=2),
+            # (Batch_Size, 512, Height / 4, Width / 4) -> (Batch_Size, 512, Height / 4, Width / 4)
+            nn.Conv2d(in_channels=512, out_channels=512, kernel_size=3, padding=1),
+            # (Batch_Size, 512, Height / 4, Width / 4) -> (Batch_Size, 512, Height / 4, Width / 4)
+            VAE_ResidualBlock(in_channels=512, out_channels=512),
+            VAE_ResidualBlock(in_channels=512, out_channels=512),
+            VAE_ResidualBlock(in_channels=512, out_channels=512),
+            # (Batch_Size, 512, Height / 4, Width / 4) -> (Batch_Size, 512, Height / 2, Width / 2)
+            nn.Upsample(scale_factor=2),
+            # (Batch_Size, 512, Height / 2, Width / 2) -> (Batch_Size, 512, Height / 2, Width / 2)
+            nn.Conv2d(in_channels=512, out_channels=512, kernel_size=3, padding=1),
+            # Reduce channels gradually
+            # (Batch_Size, 512, Height / 2, Width / 2) -> (Batch_Size, 512, Height / 2, Width / 2)
+            VAE_ResidualBlock(in_channels=512, out_channels=256),
+            VAE_ResidualBlock(in_channels=256, out_channels=256),
+            VAE_ResidualBlock(in_channels=256, out_channels=256),
+            # (Batch_Size, 256, Height / 2, Width / 2) -> (Batch_Size, 256, Height, Width)
+            nn.Upsample(scale_factor=2),
+            # (Batch_Size, 256, Height, Width) -> (Batch_Size, 256, Height, Width)
+            nn.Conv2d(in_channels=256, out_channels=256, kernel_size=3, padding=1),
+            # Reduce channels gradually
+            # (Batch_Size, 256, Height, Width) -> (Batch_Size, 128, Height, Width)
+            VAE_ResidualBlock(in_channels=256, out_channels=128),
+            VAE_ResidualBlock(in_channels=128, out_channels=128),
+            VAE_ResidualBlock(in_channels=128, out_channels=128),
+            # Group Normalization layer
+            nn.GroupNorm(num_groups=32, num_channels=128),
+            # SiLU Activation
+            nn.SiLU(),
+            # Final convolution to get back to 3 channels (RGB image)
+            # (Batch_Size, 128, Height, Width) -> (Batch_Size, 3, Height, Width)
+            nn.Conv2d(in_channels=128, out_channels=3, kernel_size=3, padding=1),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (Batch_Size, 4, Height / 8, Width / 8)
+
+        # Remove the scaling added by the Encoder.
+        x /= 0.18215  # Scale factor used in VAE
+
+        for module in self:
+            x = module(x)  # Sequentially apply each module in the decoder
+
+        # (Batch_Size, 3, Height, Width)
+        return x  # Return the final output tensor
