@@ -92,3 +92,84 @@ class SelfAttention(nn.Module):
         # Return the output tensor
         # (Batch_Size, Seq_Len, D_Embed)
         return output
+
+
+class CrossAttention(nn.Module):
+    """_summary_
+    Args:
+        nn (nn.Module): The cross-attention mechanism is implemented as a module that computes attention weights between query and key-value pairs from different sources.
+    Returns:
+        torch.Tensor: The output tensor from the cross-attention mechanism, which has the same shape as the input query tensor but with enhanced feature representations due to the attention mechanism.
+    """
+
+    def __init__(
+        self,
+        n_heads: int,
+        d_embed: int,
+        d_cross: int,
+        in_proj_bias: bool = True,
+        out_proj_bias: bool = True,
+    ):
+        super().__init__()
+        # Input projection layer to compute queries from the input embeddings.
+        # (Batch_Size, Seq_Len_Q, D_Embed) -> (Batch_Size, Seq_Len_Q, D_Embed)
+        self.q_proj = nn.Linear(d_embed, d_embed, bias=in_proj_bias)
+        self.k_proj = nn.Linear(d_cross, d_embed, bias=in_proj_bias)
+        self.v_proj = nn.Linear(d_cross, d_embed, bias=in_proj_bias)
+
+        self.out_proj = nn.Linear(d_embed, d_embed, bias=out_proj_bias)
+        # Number of attention heads and dimension per head
+        # (N_Heads, D_Head)
+        self.n_heads = n_heads
+        # Dimension of each attention head
+        # D_Head
+        self.d_head = d_embed // n_heads
+
+    def forward(self, x: torch.Tensor, context: torch.Tensor) -> torch.Tensor:
+        # x: (latent): (Batch_Size, Seq_Len_Q, D_Embed_Q)
+        # context: (Batch_Size, Seq_Len_KV, D_Cross_KV)
+
+        # Store the input shape for later use
+        input_shape = x.shape
+        batch_size, seq_len_q, d_embed = input_shape
+
+        # Compute queries, keys, and values from the input tensor and context
+        # (Batch_Size, Seq_Len, 3*D_Embed)
+        interim_shape = (batch_size, -1, self.n_heads, self.d_head)
+
+        #    Reshape queries, keys, and values to separate heads
+        #   (Batch_Size, Seq_Len, D_Embed) -> (Batch_Size, Seq_Len, D_Embed * 3) -> 3 tensor of shape (Batch_Size, Seq_Len, D_Embed)
+        q = self.q_proj(x)
+        k = self.k_proj(context)
+        v = self.v_proj(context)
+
+        # Reshape and transpose
+        # (Batch_Size, N_Heads, D_Embed) --> (Batch_Size, N_Heads, Seq_Len, N_Heads, D_Embed/N_Heads) --> (Batch_Size, N_Heads, Seq_Len, D_Embed/N_Heads)
+        q = q.view(interim_shape).transpose(1, 2)
+        k = k.view(interim_shape).transpose(1, 2)
+        v = v.view(interim_shape).transpose(1, 2)
+
+        # Scaled dot-product attention
+        # Scale queries to prevent large dot-product values
+        # (Batch_Size, N_Heads, Seq_Len_Q, D_Embed/N_Heads)
+        weight = q @ k.transpose(-1, -2)
+        # normalize by sqrt of d_head
+        weight /= math.sqrt(self.d_head)
+        # Apply softmax to obtain attention weights
+        weight = F.softmax(weight, dim=-1)
+
+        # Compute the output by applying attention weights to the values
+        # (Batch_Size, N_Heads, Seq_Len_Q, Seq_Len_KV) @ (Batch_Size, N_Heads, Seq_Len_KV, D_Embed/N_Heads) --> (Batch_Size, N_Heads, Seq_Len_Q, D_Embed/N_Heads)
+        output = weight @ v
+
+        # (Batch_Size, N_Heads, Seq_Len_Q, D_Embed/N_Heads) --> (Batch_Size, Seq_Len_Q, N_Heads, D_Embed/N_Heads)
+        output = output.transpose(1, 2).contiguous()
+
+        # (Batch_Size, Seq_Len_Q, N_Heads, D_Embed/N_Heads) --> (Batch_Size, Seq_Len_Q, D_Embed)
+        output = output.view(input_shape)
+        # Project the output back to the original embedding dimension
+        # (Batch_Size, Seq_Len_Q, D_Embed) --> (Batch_Size, Seq_Len_Q, D_Embed)
+        output = self.out_proj(output)
+        # Return the output tensor
+        # (Batch_Size, Seq_Len_Q, D_Embed)
+        return output
